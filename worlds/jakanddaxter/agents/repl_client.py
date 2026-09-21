@@ -140,6 +140,12 @@ class JakAndDaxterReplClient:
                 self.processed_initial_items = True
                 await self.send_connection_status("ready")
 
+        # Receive Items from AP (bulk). This should only happen on initial connection to AP.
+        if (count := len(self.item_inbox) - self.inbox_index) > 1:
+            print(f"DO BULK! {count} items")
+            await self.receive_items_bulk()
+            await self.save_data()
+
         # Receive Items from AP. Handle 1 item per tick.
         if len(self.item_inbox) > self.inbox_index:
             await self.receive_item()
@@ -151,7 +157,7 @@ class JakAndDaxterReplClient:
             self.received_deathlink = False
 
         # Progressively empty the queue during each tick
-        # if text messages happen to be too slow we could pool dequeuing here, 
+        # if text messages happen to be too slow we could pool dequeuing here,
         # but it'd slow down the ItemReceived message during release
         if not self.json_message_queue.empty():
             json_txt_data = self.json_message_queue.get_nowait()
@@ -335,6 +341,116 @@ class JakAndDaxterReplClient:
         else:
             self.log_error(logger, f"Tried to receive item with unknown AP ID {ap_id}!")
 
+    async def receive_items_bulk(self):
+        # The original receive_item is fine except for startup with orb bundles of 1 orb being very slow...
+        # 1 item is handled per tick normally but the network calls make it take much longer than just processing
+        # the whole batch in one go
+
+        # orbs and pills are just increment the in game counter, so just tally them up.
+        # The rest are kept in an array to be fed in one big command.
+        receivedOrbs = 0
+        receivedPills = 0
+
+        receivedCells = []
+        receivedScoutFlies = []
+        receivedSpecial = []
+        receivedMoves = []
+        receivedTraps = []
+
+        # an attempt to make the code easier to read
+        flyStart = jak1_id + flies.fly_offset
+        specialStart = jak1_id + specials.special_offset
+        cacheStart = jak1_id + caches.orb_cache_offset
+        orbStart = jak1_id + orbs.orb_offset
+        trapStart = jak1_max - max(trap_item_table)
+
+        # why is this not just an array????? I wanted to do `self.item_inbox[self.inbox_index:]`
+        while self.inbox_index < len(self.item_inbox):
+            ap_id = self.item_inbox[self.inbox_index].item
+
+            if ap_id < jak1_id: # bail early instead of wasting time checking all of them
+                self.log_error(logger, f"Tried to receive item with unknown AP ID {ap_id}!")
+                continue
+
+            # not bothering with array searches since >= and < are enough.
+            # Since I checked if less than minimum I can also remove all of the lower bound checks, elif already skips once range is found.
+            if ap_id < flyStart:
+                cell_id = cells.to_game_id(ap_id)
+                receivedCells.append(str(cell_id))
+
+            elif ap_id < specialStart:
+                fly_id = flies.to_game_id(ap_id)
+                receivedScoutFlies.append(str(fly_id))
+
+            elif ap_id < cacheStart:
+                special_id = specials.to_game_id(ap_id)
+                receivedSpecial.append(str(special_id))
+
+            elif ap_id < orbStart:
+                move_id = caches.to_game_id(ap_id)
+                receivedMoves.append(str(move_id))
+
+            elif ap_id < trapStart:
+                orb_amount = orbs.to_game_id(ap_id)
+                receivedOrbs += orb_amount
+
+            elif ap_id == jak1_max:
+                receivedPills += 1
+
+            else:
+                self.log_error(logger, f"Tried to receive item with unknown AP ID {ap_id}!")
+                continue
+
+            self.inbox_index += 1
+
+        if len(receivedCells) > 0:
+            await self.receive_bulk_items("Power Cells", "fuel-cell", receivedCells)
+        if len(receivedScoutFlies) > 0:
+            await self.receive_bulk_items("Scout Flies", "buzzer", receivedScoutFlies)
+        if len(receivedSpecial) > 0:
+            await self.receive_bulk_items("Special Unlocks", "ap-special", receivedSpecial)
+        if len(receivedMoves) > 0:
+            await self.receive_bulk_items("moves", "ap-move", receivedMoves)
+        if receivedOrbs > 0:
+            await self.receive_orbs(receivedOrbs)
+        if receivedPills > 0:
+            await self.receive_eco_pills(receivedPills)
+
+    # Bulk item senders
+    async def receive_bulk_items(self, pretty_name : str, pickup_type : str, items : list[str]):
+        # An int array is created instead of floats because with highest move id it turns it into hex for some reason idky
+        ok = await self.send_form(f"(let ((arr (new 'static 'array int {len(items)} {' '.join(items)})))"
+                                  f"(dotimes (i {len(items)})"
+                                   "(send-event "
+                                   "*target* \'get-archipelago "
+                                  f"(pickup-type {pickup_type}) "
+                                   "(the float (-> arr i)) )))")
+        if ok:
+            logger.debug(f"Received {len(items)} {pretty_name}!")
+        else:
+            self.log_error(logger, f"Unable to receive {len(items)} {pretty_name}s!")
+        return ok
+
+    async def receive_orbs(self, orb_count : int):
+        ok = await self.send_form("(send-event "
+                                  "*target* \'get-archipelago "
+                                  "(pickup-type money) "
+                                  "(the float " + str(orb_count) + "))")
+        if ok:
+            logger.debug(f"Received {orb_count} Precursor orbs!")
+        else:
+            self.log_error(logger, f"Unable to receive {orb_count} Precursor orbs!")
+        return ok
+
+    async def receive_eco_pills(self, pill_count : int):
+        ok = await self.send_form(f"(dotimes (i {pill_count}) (send-event *target* \'get-pickup (pickup-type eco-pill) (the float 1)))")
+        if ok:
+            logger.debug(f"Received {pill_count} green eco pills!")
+        else:
+            self.log_error(logger, f"Unable to receive {pill_count} green eco pills!")
+        return ok
+
+    # Standard item senders
     async def receive_power_cell(self, ap_id: int) -> bool:
         cell_id = cells.to_game_id(ap_id)
         ok = await self.send_form("(send-event "
