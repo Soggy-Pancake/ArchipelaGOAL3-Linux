@@ -142,7 +142,6 @@ class JakAndDaxterReplClient:
 
         # Receive Items from AP (bulk). This should only happen on initial connection to AP.
         if (count := len(self.item_inbox) - self.inbox_index) > 1:
-            print(f"DO BULK! {count} items")
             await self.receive_items_bulk()
             await self.save_data()
 
