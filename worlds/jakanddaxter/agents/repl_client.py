@@ -68,7 +68,7 @@ class JakAndDaxterReplClient:
     gk_process: OpenProcess | None = None
     goalc_process: OpenProcess | None = None
 
-    item_inbox: dict[int, NetworkItem] = {}
+    item_inbox: list[NetworkItem] = []
     inbox_index = 0
     json_message_queue: Queue[JsonMessageData] = queue.Queue()
 
@@ -332,10 +332,8 @@ class JakAndDaxterReplClient:
         orb_start = jak1_id + orbs.orb_offset
         trap_start = jak1_max - max(trap_item_table)
 
-        # why is this not just an array????? I wanted to do `self.item_inbox[self.inbox_index:]`
-        while self.inbox_index < len(self.item_inbox):
-            ap_id = self.item_inbox[self.inbox_index].item
-            self.inbox_index += 1
+        for new_item in self.item_inbox[self.inbox_index:]:
+            ap_id = new_item.item
 
             if ap_id < jak1_id or ap_id > jak1_max: # bail early instead of wasting time checking all of them
                 self.log_error(logger, f"Tried to receive item with unknown AP ID {ap_id}!")
@@ -388,6 +386,9 @@ class JakAndDaxterReplClient:
             await self.receive_item_amount("Precursor orbs", "money", received_orbs)
         if self.processed_initial_items and received_pills > 0:
             await self.receive_item_amount("Green Eco Pills", "eco-pill", received_pills)
+
+        self.inbox_index = len(self.item_inbox)
+
 
     async def receive_items(self, pretty_name : str, pickup_type : str, items : list[str]):
         # An int array is created instead of floats because with highest move id it turns it into hex for some reason idky
@@ -504,10 +505,10 @@ class JakAndDaxterReplClient:
             dump = {
                 "inbox_index": self.inbox_index,
                 "item_inbox": [{
-                    "item": self.item_inbox[k].item,
-                    "location": self.item_inbox[k].location,
-                    "player": self.item_inbox[k].player,
-                    "flags": self.item_inbox[k].flags
+                    "item": k.item,
+                    "location": k.location,
+                    "player": k.player,
+                    "flags": k.flags
                     } for k in self.item_inbox
                 ]
             }
@@ -518,12 +519,12 @@ class JakAndDaxterReplClient:
             with open("jakanddaxter_item_inbox.json", "r") as f:
                 load = json.load(f)
                 self.inbox_index = load["inbox_index"]
-                self.item_inbox = {k: NetworkItem(
+                self.item_inbox = [NetworkItem(
                         item=load["item_inbox"][k]["item"],
                         location=load["item_inbox"][k]["location"],
                         player=load["item_inbox"][k]["player"],
                         flags=load["item_inbox"][k]["flags"]
                     ) for k in range(0, len(load["item_inbox"]))
-                }
+                ]
         except FileNotFoundError:
             pass
