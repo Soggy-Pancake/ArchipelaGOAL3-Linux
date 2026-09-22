@@ -318,8 +318,8 @@ class JakAndDaxterReplClient:
         # The rest are kept in an array to be fed in one big command.
         received_orbs = 0
         received_pills = 0
+        received_cells = 0
 
-        received_cells = []
         received_scout_flies = []
         received_special = []
         received_moves = []
@@ -342,8 +342,7 @@ class JakAndDaxterReplClient:
             # not bothering with array searches since >= and < are enough.
             # Since I checked if less than minimum I can remove all of the lower bound checks, elif already skips once range is found.
             if ap_id < fly_start:
-                cell_id = cells.to_game_id(ap_id)
-                received_cells.append(str(cell_id))
+                received_cells += 1
 
             elif ap_id < special_start:
                 fly_id = flies.to_game_id(ap_id)
@@ -372,8 +371,8 @@ class JakAndDaxterReplClient:
                 continue
 
         # Traps and pills are useless on the title screen so I don't bother sending them
-        if len(received_cells) > 0:
-            await self.receive_items("Power Cells", "fuel-cell", received_cells)
+        if received_cells > 0:
+            await self.receive_item_amount("Power Cells", "fuel-cell", received_cells)
         if len(received_scout_flies) > 0:
             await self.receive_items("Scout Flies", "buzzer", received_scout_flies)
         if len(received_special) > 0:
