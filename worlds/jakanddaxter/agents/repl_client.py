@@ -384,7 +384,7 @@ class JakAndDaxterReplClient:
         if received_orbs > 0:
             await self.receive_item_amount("Precursor orbs", "money", received_orbs)
         if self.processed_initial_items and received_pills > 0:
-            await self.receive_item_amount("Green Eco Pills", "eco-pill", received_pills)
+            await self.receive_item_amount("Green Eco Pills", "eco-pill", received_pills, event="get-pickup")
 
         self.inbox_index = len(self.item_inbox)
 
@@ -403,9 +403,9 @@ class JakAndDaxterReplClient:
             self.log_error(logger, f"Unable to receive {len(items)} {pretty_name}s!")
         return ok
 
-    async def receive_item_amount(self, pretty_name : str, pickup_type : str, count : int):
+    async def receive_item_amount(self, pretty_name : str, pickup_type : str, count : int, event : str = "get-archipelago"):
         ok = await self.send_form("(send-event "
-                                  "*target* \'get-archipelago "
+                                 f"*target* \'{event} "
                                  f"(pickup-type {pickup_type})"
                                  f"(the float {count}))")
         if ok:
